@@ -1,0 +1,13 @@
+Instalar python v3.x
+
+verificar versão python :
+  $ python --version
+
+verificar pip:
+  $ pip --version
+
+instalar pre-dependencias:
+  $ pip install xlrd
+
+instalar dependencias:
+  $ pip install pandas openpyxl
