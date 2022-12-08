@@ -1,19 +1,20 @@
 characteristics = {
   "abertura" : 1,
   "acabamento" : 2,
-  "bitola" : 16,
-  "pressao_max" : 17,
-  "pressao_min" : 18,
-  "norma" : 19
+  "bitola" : 14,
+  "pressao_max" : 15,
+  "pressao_min" : 16,
+  "norma" : 17
 }
 
 # manipuladores de data e hora
-from datetime import date, datetime, timedelta
-import calendar
+from datetime import datetime
+
+# debug de erro
+import traceback
 
 # métodos de sistema
 import sys
-import math
 
 # ler/manipular arquivos do excel (.xls)
 import pandas as pd
@@ -31,39 +32,66 @@ database = mysql.connector.connect(
 
 # apagar logs de erro anteriores
 open("error-log.txt", "w").close()
+open("caracteristicas-log.txt", "w").close()
 
+error_log = open("error-log.txt", "a")
+
+def create_characteristic(main_characteristic_id, characteristic, company):
+  try:
+    if str(characteristic) == "nan" or str(main_characteristic_id) == "nan" or str(company) == "nan":
+      return 0
+
+    sql_insert_characteristic = 'INSERT INTO characteristics_descriptions (description, updatedAt, characteristic, company) VALUES (%s, %s, %s, %s)'
+    cursor = database.cursor()
+
+    cursor.execute(sql_insert_characteristic, (characteristic, datetime.now(), main_characteristic_id, company))
+    database.commit()
+
+    print("[ Caracteristica criada {} ]".format(characteristic))
+
+    return int(cursor.lastrowid)
+
+  except Exception:
+    print("[ Falha ao criar caracteristica {}: ] ".format(characteristic))
+    # traceback.print_exc()
+    return 0
 
 def register_characteristic(company_id, main_characteristic_id, characteristic, product_id):
 
   if(str(characteristic) == "nan"):
     return True
-
   # criar cursor database
   cursor = database.cursor()
 
+  # verificar se a characteristica existe
   sql_search_characteristic = 'SELECT id from characteristics_descriptions WHERE description = "{}" AND characteristic = "{}" AND company = "{}"'.format(characteristic, main_characteristic_id, company_id)
   cursor.execute(sql_search_characteristic)
 
   find_characteristic_res = cursor.fetchall()
   finded= bool(find_characteristic_res)
 
-  if not finded:
-    print("[ Caracteristica não encontrada: {} ]".format(characteristic, end=""))
-    return False
-  sql_search_characteristic = 'SELECT id from characteristics_descriptions WHERE description = "{}" AND characteristic = "{}" AND company = "{}"'.format(characteristic, main_characteristic_id, company_id)
-  cursor.execute(sql_search_characteristic)
-
-  find_characteristic_res = cursor.fetchall()
-  finded= bool(find_characteristic_res)
+  characteristic_id = 0
 
   if not finded:
     print("[ Caracteristica não encontrada: {} ]".format(characteristic, end=""))
-    return False
-  
-  characteristic_id = int(find_characteristic_res[0][0])
 
+    created_id = create_characteristic(main_characteristic_id, characteristic, company_id)
+
+    if not bool(created_id):
+      caracteristicas_log = open("caracteristicas-log.txt", "a")
+      caracteristicas_log.write( 'erro ao criar caracteristica {}'.format(characteristic) + "\n")
+      caracteristicas_log.close()
+      return False
+
+    characteristic_id = created_id
+  else:
+    # pega o id da entidade caracteristca
+    characteristic_id = find_characteristic_res[0][0]
+  # sql para inserir caracteristica
   sql_insert_product_service_characteristic = "INSERT INTO characteristics_product_services (characteristic_description, products_service) VALUES (%s, %s)"
 
+  # tenta inserir a entidade no database
+  # caso der erro, na main, irá ser feito o rollback de todas as transações anteriores, relacionados ao produto atual
   try:
     cursor.execute(sql_insert_product_service_characteristic, (int(characteristic_id), int(product_id)))
     return True
@@ -107,8 +135,8 @@ def main():
   # log de erro caso ocorra na query sql
 
   for index in range(number_of_lines):
-    if index > 1:
-      break
+    # if index > 100:
+    #   break
 
     category = 21
     title = spreadsheet['NOME_PRODUTO'][index]
@@ -145,18 +173,21 @@ def main():
       default_insert = register_characteristic(company, characteristics["norma"], default, product_id)
       workmanship_insert = register_characteristic(company, characteristics["acabamento"], workmanship, product_id)
 
+      # verifica se todas a caracteristica foram inseridas com sucesso
+      # caso contrário, faz rollback de todas as transações anteriores relacionadas a este produto
       if(aperture_insert and gauge_insert and press_min_insert and press_max_insert and default_insert and workmanship_insert):
         database.commit()
-        pass
       else:
         print("[ Erro ao cadastrar caracteristica de produto - fazendo rollback da transação ]", end="")
+        database.rollback()
         raise Exception("Doing rollback!")
 
-      database.rollback()
-    except Exception as e:
+    except Exception:
       print("\n[ Erro ao inserir elemento no banco de dados - código {} ]".format(code))
-      error_log.write(str(code) + "\t\t-\t\t" + str(code) + "at" + str(title) + "\t" + str(price) + "\t" + str(aperture) + "\t" + str(default) + "\t" + str(gauge) + "\t" + str(min_pressure) + "\t" + str(max_pressure) + "\t" + str(datetime.now()) + "\n")
-      print(e)
+      error_log.write(str(code) + "\t\t-\t\t" + str(code) + "at" + str(title) + "\t" + "\t" + str(aperture) + "\t" + str(default) + "\t" + str(gauge) + "\t" + str(min_pressure) + "\t" + str(max_pressure) + "\t" + str(datetime.now()) + "\n")
+      error_log.close()
+      traceback.print_exc()
+      sys.exit(0)
 
   # fechar arquivo de log
   error_log.close()
